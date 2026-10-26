@@ -1,9 +1,8 @@
-name: Build APK
+name: Build APK (test copy)
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ ci-build-final ]
 
 jobs:
   build:
@@ -48,6 +47,13 @@ jobs:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
         run: flutter build apk --release --build-number=${{ github.run_number }}
 
+      - name: Show APK signer (test only)
+        run: |
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          $BT/apksigner verify --print-certs build/app/outputs/flutter-apk/app-release.apk | head -4
+          $BT/aapt2 dump badging build/app/outputs/flutter-apk/app-release.apk | grep -E "^package|application-label:"
+          ls -la ~/.android/ || true
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
@@ -58,7 +64,7 @@ jobs:
       # debug key, so debug-signed releases couldn't update one another, and
       # a run on another branch shouldn't reach Obtainium.
       - name: Publish release
-        if: steps.keystore.outputs.path != '' && github.ref == 'refs/heads/main'
+        if: steps.keystore.outputs.path != '' && github.ref == 'refs/heads/ci-build-final'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: build-${{ github.run_number }}
@@ -75,5 +81,6 @@ jobs:
             3. Enable *Install unknown apps* for your file manager and tap the APK
           files: build/app/outputs/flutter-apk/app-release.apk
           make_latest: true
+          draft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
