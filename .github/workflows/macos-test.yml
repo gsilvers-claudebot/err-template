@@ -1,0 +1,52 @@
+# Test-only workflow (lives on the bot fork's ci-macos branch, not in the PR).
+# Follows docs/macos.md's "Without Android Studio" route on a macOS runner
+# with a fresh SDK, then the documented commands, then tool/rename.sh.
+name: macOS test
+on:
+  push:
+    branches: [ci-macos-final]
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install tools (docs/macos.md, without Android Studio)
+        run: |
+          unset ANDROID_HOME ANDROID_SDK_ROOT
+          # Hide the runner's preinstalled SDK so it can't stand in for ours.
+          mv ~/Library/Android/sdk ~/Library/Android/sdk.runner
+          brew update
+          brew install --cask flutter android-commandlinetools temurin@21
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager platform-tools
+          flutter config --android-sdk "$(brew --prefix)/share/android-commandlinetools"
+          flutter doctor -v
+      - name: Check and test
+        run: |
+          unset ANDROID_HOME ANDROID_SDK_ROOT
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: Build APKs
+        run: |
+          unset ANDROID_HOME ANDROID_SDK_ROOT
+          flutter build apk --debug
+          flutter build apk --release
+          ls -la build/app/outputs/flutter-apk/
+          BT=$(ls -d "$(brew --prefix)"/share/android-commandlinetools/build-tools/* | sort -V | tail -1)
+          for a in build/app/outputs/flutter-apk/*.apk; do
+            echo "== $a"; "$BT/aapt2" dump badging "$a" | grep -E "^package|application-label:"
+            "$BT/apksigner" verify --print-certs "$a" | head -3
+          done
+      - name: rename.sh with BSD tools
+        run: |
+          unset ANDROID_HOME ANDROID_SDK_ROOT
+          rm -rf /tmp/rt && cp -R . /tmp/rt && cd /tmp/rt && rm -rf build .dart_tool
+          tool/rename.sh blerr "Blerr" io.github.gsilvers.blerr
+          git add -A && git status --short
+          ! grep -rn "err_template\|Err Template" --exclude-dir=.git --exclude-dir=docs --exclude-dir=tool .
+          flutter analyze && flutter test
+          flutter build apk --debug
+          BT=$(ls -d "$(brew --prefix)"/share/android-commandlinetools/build-tools/* | sort -V | tail -1)
+          "$BT/aapt2" dump badging build/app/outputs/flutter-apk/app-debug.apk | grep -E "^package|application-label:"
