@@ -70,7 +70,7 @@ termux-open build/app/outputs/flutter-apk/app-debug.apk
 ```
 
 `--target-platform android-arm64` builds only for the phone's kind of CPU,
-which makes the APK about a third of the size. `termux-open` hands the APK to
+which halves the APK's size (to about 75 MB). `termux-open` hands the APK to
 Android's installer; the first time, Android asks you to let Termux install
 apps. The debug build installs as "Blerr (debug)" next to the release from
 Obtainium, with its own data.
