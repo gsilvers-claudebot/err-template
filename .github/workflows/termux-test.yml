@@ -1,0 +1,55 @@
+# Test-only workflow (lives on the bot fork's ci-termux branch, not in the PR).
+# Runs tool/termux/setup.sh in a real Termux userland on an arm64 runner,
+# then the documented flutter commands through the installed wrapper.
+name: Termux test
+on:
+  push:
+    branches: [ci-termux-final]
+jobs:
+  termux:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup, test and build inside termux-docker
+        run: |
+          mkdir -p out && chmod 777 out
+          docker run --rm --privileged \
+            -v "$PWD:/src:ro" -v "$PWD/out:/out" \
+            termux/termux-docker:aarch64 bash -c '
+              set -euxo pipefail
+              cp -r /src ~/app && cd ~/app
+              # Use the main mirror; a random one can be out of sync.
+              ls $PREFIX/etc/termux/mirrors/
+              ln -sfn $PREFIX/etc/termux/mirrors/default $PREFIX/etc/termux/chosen_mirrors
+              yes | pkg upgrade -y || true
+              # termux-docker makes /system a symlink, so proot-distro binds
+              # it at its real path instead of /system as on a phone. Shim
+              # proot-distro to add the bind a phone would get.
+              mkdir -p ~/shim
+              printf "%s\n" "#!$PREFIX/bin/sh" \
+                "if [ \"\$1\" = login ]; then shift; exec $PREFIX/bin/proot-distro login --bind $PREFIX/opt/aosp:/system \"\$@\"; fi" \
+                "exec $PREFIX/bin/proot-distro \"\$@\"" > ~/shim/proot-distro
+              chmod +x ~/shim/proot-distro && cat ~/shim/proot-distro
+              export PATH=~/shim:$PATH
+              pkg install -y git unzip
+              time bash tool/termux/setup.sh
+              time flutter test
+              dart format --output=none --set-exit-if-changed lib test
+              time flutter build apk --debug --target-platform android-arm64
+              ls -la build/app/outputs/flutter-apk/
+              echo "--- second build, to time a warm one"
+              time flutter build apk --debug --target-platform android-arm64
+              pgrep -a java || echo "no java left running"
+              du -sh $PREFIX/var/lib/proot-distro ~/.cache 2>/dev/null || true
+              proot-distro login debian -- du -sh /opt/flutter /opt/android-sdk /root/.gradle /root/.pub-cache /var/cache/apt || true
+              aapt2 dump badging build/app/outputs/flutter-apk/app-debug.apk | grep -E "^package|application-label"
+              unzip -l build/app/outputs/flutter-apk/app-debug.apk | grep "\.so$"
+              cp build/app/outputs/flutter-apk/app-debug.apk /out/
+              echo "--- release build (expected to fail: no arm64 gen_snapshot)"
+              flutter build apk --release 2>&1 | tail -15 || true
+            '
+      - uses: actions/upload-artifact@v7
+        with:
+          name: termux-app-debug
+          path: out/app-debug.apk
